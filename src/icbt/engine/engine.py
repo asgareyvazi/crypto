@@ -120,7 +120,7 @@ class BacktestEngine:
             if tf == strategy.timeframe:
                 continue
             try:
-                available_inf[tf] = resample_ohlcv(
+                inf_df = resample_ohlcv(
                     df[["open", "high", "low", "close", "volume"]], strategy.timeframe, tf
                 )
             except Exception as e:
@@ -128,6 +128,20 @@ class BacktestEngine:
                 return _empty_result(
                     run_id, strategy, self.config, data, validation, errors, warnings
                 )
+            # Compute informative indicators on native (non-repeated) candles so
+            # EMA/RSI smoothing is correct. The hook is pure: it receives only
+            # the informative frame and its timeframe, so no base-candle data
+            # can leak in. merge_informative below handles no-lookahead alignment.
+            try:
+                inf_df = strategy.populate_informative_indicators(
+                    inf_df, tf, {"pair": data.symbol}
+                )
+            except Exception as e:
+                errors.append(f"Strategy informative-indicator failure for {tf}: {e}")
+                return _empty_result(
+                    run_id, strategy, self.config, data, validation, errors, warnings
+                )
+            available_inf[tf] = inf_df
         # BTC informative
         btc_inf: dict[str, pd.DataFrame] = {}
         if strategy.btc_inf_timeframes:
@@ -141,13 +155,23 @@ class BacktestEngine:
                 )
             for tf in strategy.btc_inf_timeframes:
                 if tf == btc_data.timeframe:
-                    btc_inf[tf] = btc_data.df
+                    bdf = btc_data.df.copy()
                 else:
-                    btc_inf[tf] = resample_ohlcv(
+                    bdf = resample_ohlcv(
                         btc_data.df[["open", "high", "low", "close", "volume"]],
                         btc_data.timeframe,
                         tf,
                     )
+                try:
+                    bdf = strategy.populate_btc_informative_indicators(
+                        bdf, tf, {"pair": btc_data.symbol}
+                    )
+                except Exception as e:
+                    errors.append(f"Strategy BTC informative-indicator failure for {tf}: {e}")
+                    return _empty_result(
+                        run_id, strategy, self.config, data, validation, errors, warnings
+                    )
+                btc_inf[tf] = bdf
 
         # 3. Merge informatives onto the base frame
         enriched = df.copy()

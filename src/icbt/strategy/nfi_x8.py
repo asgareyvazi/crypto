@@ -108,6 +108,28 @@ class NostalgiaForInfinityX8(Strategy):
     # Track last trade time so we don't re-enter immediately
     _last_exit_time: pd.Timestamp | None = None
 
+    # --------------------------------------------------------------- populate informative indicators (native TF)
+    def populate_informative_indicators(
+        self, informative: pd.DataFrame, tf: str, metadata: dict | None = None,
+    ) -> pd.DataFrame:
+        """Compute informative EMA(50)/EMA(200) on NATIVE informative candles
+        (one row per informative candle) BEFORE the engine merges them onto
+        the 5m frame. This avoids the classic bug where EMA is calculated
+        over repeated close values (after merge_informative, the same close
+        appears in many consecutive 5m rows, which corrupts smoothing)."""
+        out = informative.copy()
+        out[f"ema_50_{tf}"] = EMA(out["close"], 50)
+        out[f"ema_200_{tf}"] = EMA(out["close"], 200)
+        return out
+
+    def populate_btc_informative_indicators(
+        self, informative: pd.DataFrame, tf: str, metadata: dict | None = None,
+    ) -> pd.DataFrame:
+        out = informative.copy()
+        out[f"btc_ema_50_{tf}"] = EMA(out["close"], 50)
+        out[f"btc_rsi_{tf}"] = RSI(out["close"], 14)
+        return out
+
     # --------------------------------------------------------------- populate indicators
     def populate_indicators(self, df: pd.DataFrame, metadata: dict | None = None) -> pd.DataFrame:
         df = df.copy()
@@ -125,7 +147,6 @@ class NostalgiaForInfinityX8(Strategy):
 
         # Oscillators
         df["rsi"] = RSI(c, p["rsi_period"])
-        df["rsi_4h"] = df.get("rsi_btc_4h", np.nan)  # placeholder when BTC not present
         df["stochrsi_k"], df["stochrsi_d"] = STOCHRSI(c, p["rsi_period"], 14, 3, 3)
         df["mfi"] = MFI(hi, lo, c, v, p["mfi_period"])
         df["cci"] = CCI(hi, lo, c, p["cci_period"])
@@ -144,17 +165,11 @@ class NostalgiaForInfinityX8(Strategy):
         df["volume_sma"] = SMA(v, p["volume_sma"])
         df["volume_ratio"] = v / df["volume_sma"].replace(0, np.nan)
 
-        # Informative trend indicators (when present)
-        for tf in self.inf_timeframes:
-            col = f"close_{tf}"
-            if col in df.columns:
-                df[f"ema_50_{tf}"] = EMA(df[col], 50)
-                df[f"ema_200_{tf}"] = EMA(df[col], 200)
-
-        # BTC informative (when supplied)
-        if "close_btc_4h" in df.columns:
-            df["btc_ema_50_4h"] = EMA(df["close_btc_4h"], 50)
-            df["btc_rsi_4h"] = RSI(df["close_btc_4h"], 14)
+        # Informative trend indicators are computed on native informative
+        # candles by populate_informative_indicators / populate_btc_informative_indicators
+        # and merged in by the engine as ema_50_<tf>, ema_200_<tf>,
+        # btc_ema_50_<tf>, btc_rsi_<tf>. We do NOT recompute them here on the
+        # repeated-tail columns (that would corrupt EMA/RSI smoothing).
 
         # Safeguard columns - ensure they exist even if no informative joined
         for col in [

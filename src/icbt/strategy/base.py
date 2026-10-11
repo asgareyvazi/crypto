@@ -120,10 +120,48 @@ class Strategy:
         """Attach indicator columns to ``df`` and return it.
 
         ``df`` is the base (lowest) timeframe frame already enriched with
-        informative-timeframe columns (see :meth:`informative_pairs` and
+        informative-timeframe columns and their pre-computed indicators
+        (see :meth:`populate_informative_indicators` and
         :func:`icbt.data.timeframes.merge_informative`).
         """
         raise NotImplementedError("Subclasses must implement populate_indicators")
+
+    def populate_informative_indicators(
+        self,
+        informative: pd.DataFrame,
+        tf: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> pd.DataFrame:
+        """Attach indicators to an informative timeframe frame **on its native
+        candles** (one row per informative candle) BEFORE it is merged onto the
+        base frame.
+
+        Subclasses should override this to compute EMA/RSI/etc. on the actual
+        informative series rather than on the repeated close columns that
+        appear after ``merge_informative`` (repeating the close across every
+        base candle corrupts EMA/RSI smoothing).  When the engine merges the
+        returned frame onto the base 5m frame, every base candle covered by
+        the same informative candle will see the identical indicator value
+        (which is the correct behaviour — informative indicators update only
+        when a new informative candle closes).
+
+        The default implementation returns ``informative`` unchanged; that is
+        always safe but informative-only indicators will not be available.
+        Implementations MUST be pure and deterministic: no base-timeframe
+        data is provided here, so there is no way to leak future base
+        information into the calculation. ``merge_informative`` itself
+        guarantees no-lookahead alignment.
+        """
+        return informative
+
+    def populate_btc_informative_indicators(
+        self,
+        informative: pd.DataFrame,
+        tf: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> pd.DataFrame:
+        """BTC-pair variant of :meth:`populate_informative_indicators`."""
+        return informative
 
     def populate_entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Set ``df['enter_long']`` to True/1 on candles that generate a long entry."""

@@ -208,8 +208,17 @@ def merge_informative(
     The merge guarantees **no lookahead**: for every base candle the attached
     informative values come from the informative candle whose closing time is
     strictly <= the base candle's open time (the Freqtrade
-    ``merge_informative_pair`` convention). Informative columns are suffixed
-    with ``f"_{suffix}"``.
+    ``merge_informative_pair`` convention).
+
+    Column handling:
+      * The five raw OHLCV columns (``open, high, low, close, volume``) are
+        suffixed with ``f"_{suffix}"`` on the merged frame (so ``close`` becomes
+        ``close_1h`` / ``close_btc_4h`` depending on ``suffix``).
+      * All other columns (indicators pre-computed on the informative frame,
+        e.g. ``ema_50_1h``, ``btc_rsi_4h``) are merged AS-IS with no extra
+        suffix appended.  Strategies are expected to produce those column
+        names directly from :meth:`populate_informative_indicators` /
+        :meth:`populate_btc_informative_indicators`.
     """
     if base_tf != "5m" and timeframe_to_minutes(base_tf) >= timeframe_to_minutes(inf_tf):
         raise ValueError(
@@ -218,9 +227,14 @@ def merge_informative(
     col_suffix = suffix if suffix.startswith("_") else f"_{suffix}"
 
     inf = informative.copy()
-    cols = [c for c in inf.columns if c != "timestamp"]
-    inf = inf[cols]
-    inf = inf.rename(columns={c: f"{c}{col_suffix}" for c in cols})
+    # Drop any stale "timestamp" column before merge.
+    inf = inf[[c for c in inf.columns if c != "timestamp"]]
+    rename_map: dict[str, str] = {}
+    for c in list(inf.columns):
+        if c in ("open", "high", "low", "close", "volume"):
+            rename_map[c] = f"{c}{col_suffix}"
+        # Other (indicator) columns keep their existing names (already suffix-qualified).
+    inf = inf.rename(columns=rename_map)
 
     delta_inf = pd.Timedelta(timeframe_to_timedelta(inf_tf))
     base_sorted = base.sort_index()
