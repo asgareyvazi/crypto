@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ICBT — Independent Crypto Backtester</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0f1218; --panel:#161b25; --panel2:#1d2330; --line:#2a3142;
+    --fg:#e6eaf2; --muted:#8d96a8; --accent:#4f8cff; --good:#37d399; --bad:#ff6b6b; --warn:#ffb946;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--fg);font-size:14px;}
+  header{padding:14px 22px;background:var(--panel);border-bottom:1px solid var(--line);
+         display:flex;align-items:center;justify-content:space-between;}
+  header h1{margin:0;font-size:18px;letter-spacing:.3px;}
+  header .v{color:var(--muted);font-size:12px;margin-left:10px;}
+  main{display:grid;grid-template-columns:340px 1fr;gap:14px;padding:14px;}
+  @media (max-width:980px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;}
+  .panel h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+                        padding:8px 10px;border-radius:6px;font-size:13px;font-family:inherit;}
+  button{background:var(--accent);color:white;border:0;padding:9px 14px;border-radius:6px;cursor:pointer;
+         font-weight:600;font-size:13px;}
+  button.secondary{background:var(--panel2);border:1px solid var(--line);color:var(--fg);}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  .row{display:flex;gap:8px;}
+  .row>*{flex:1}
+  .ds{padding:8px 10px;border-radius:6px;background:var(--panel2);margin-bottom:6px;cursor:pointer;
+       display:flex;justify-content:space-between;align-items:center;border:1px solid transparent;}
+  .ds:hover{border-color:var(--accent)}
+  .ds.sel{border-color:var(--accent);background:#1f2b45;}
+  .pill{padding:2px 7px;border-radius:99px;font-size:11px;font-weight:600;}
+  .pill.ok{background:rgba(55,211,153,.15);color:var(--good)}
+  .pill.bad{background:rgba(255,107,107,.15);color:var(--bad)}
+  .pill.warn{background:rgba(255,185,70,.15);color:var(--warn)}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  @media (max-width:800px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  .metric{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;}
+  .metric .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}
+  .metric .v{font-size:18px;font-weight:600;margin-top:4px}
+  .metric.good .v{color:var(--good)} .metric.bad .v{color:var(--bad)}
+  pre{background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:12px;
+      overflow:auto;font-size:12px;color:#c8d1e2;max-height:360px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;}
+  .err{color:var(--bad)} .warn{color:var(--warn)} .ok{color:var(--good)}
+  .tabs{display:flex;gap:8px;margin-bottom:10px;}
+  .tab{padding:6px 12px;border-radius:6px;background:var(--panel2);cursor:pointer;border:1px solid var(--line);font-size:12px;}
+  .tab.active{background:var(--accent);color:white;border-color:var(--accent)}
+  canvas{width:100%;height:280px;background:#0a0d13;border:1px solid var(--line);border-radius:8px;}
+  .flex-between{display:flex;justify-content:space-between;align-items:center;}
+  a{color:var(--accent)}
+  .hint{color:var(--muted);font-size:11px;margin-top:3px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ICBT <span class="v">Independent Crypto Backtester · v{{version}}</span></h1>
+  </div>
+  <div><a href="/docs" style="color:var(--muted);font-size:12px">API docs</a></div>
+</header>
+<main>
+  <aside>
+    <div class="panel">
+      <h2>Datasets</h2>
+      <input type="file" id="upload" accept=".csv" style="margin-bottom:8px">
+      <div id="datasets"></div>
+      <p class="hint">Place CSV files in the <code>data/</code> directory or upload above.</p>
+    </div>
+    <div class="panel">
+      <h2>Backtest config</h2>
+      <label>Strategy</label>
+      <select id="strategy">
+        {% for s in strategies %}<option>{{s}}</option>{% endfor %}
+      </select>
+      <label>BTC dataset (optional)</label>
+      <select id="btc"><option value="">— none —</option></select>
+      <div class="row">
+        <div><label>Initial cash</label><input id="cash" type="number" value="10000" step="100"></div>
+        <div><label>Stake %</label><input id="stake_pct" type="number" value="0.10" step="0.01"></div>
+      </div>
+      <div class="row">
+        <div><label>Fee rate</label><input id="fee" type="number" value="0.001" step="0.0001"></div>
+        <div><label>Slippage bps</label><input id="slippage_bps" type="number" value="5" step="1"></div>
+      </div>
+      <div class="row">
+        <div><label>Stoploss</label><input id="stoploss" type="number" step="0.01" placeholder="strategy default"></div>
+        <div><label>Fill model</label>
+          <select id="fill_model">
+            <option value="next_open" selected>next open (recommended)</option>
+            <option value="next_close">next close</option>
+            <option value="same_close">same close (lookahead!)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>Start (UTC)</label><input id="start" placeholder="2026-09-01"></div>
+        <div><label>End (UTC)</label><input id="end" placeholder="2026-10-01"></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button id="validate" class="secondary" style="flex:1">Validate</button>
+        <button id="run" style="flex:2">Run backtest</button>
+      </div>
+      <div style="margin-top:8px"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="fail_on_gaps" style="width:auto"> Fail on gaps/errors</label></div>
+    </div>
+  </aside>
+  <section>
+    <div class="panel" id="validation-panel" style="display:none">
+      <h2>Dataset validation</h2>
+      <div id="validation-body"></div>
+    </div>
+    <div class="panel" id="result-panel" style="display:none">
+      <div class="flex-between">
+        <h2>Backtest result <span class="v" id="runid" style="color:var(--muted);font-size:12px"></span></h2>
+        <div>
+          <a id="dl-summary" href="#"><button class="secondary">Summary</button></a>
+          <a id="dl-trades" href="#"><button class="secondary">Trades CSV</button></a>
+          <a id="dl-equity" href="#"><button class="secondary">Equity CSV</button></a>
+          <a id="dl-json" href="#"><button class="secondary">JSON</button></a>
+        </div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <div class="tabs" style="margin-top:14px">
+        <div class="tab active" data-tab="equity">Equity</div>
+        <div class="tab" data-tab="trades">Trades</div>
+        <div class="tab" data-tab="summary">Summary</div>
+        <div class="tab" data-tab="issues">Issues</div>
+      </div>
+      <div id="tab-equity"><canvas id="eqChart"></canvas></div>
+      <div id="tab-trades" style="display:none"><div style="overflow:auto;max-height:360px"><table id="tradesTable"></table></div></div>
+      <div id="tab-summary" style="display:none"><pre id="summaryText"></pre></div>
+      <div id="tab-issues" style="display:none"><pre id="issuesText"></pre></div>
+    </div>
+    <div class="panel">
+      <h2>Run history</h2>
+      <div id="history" style="overflow:auto;max-height:360px"></div>
+    </div>
+  </section>
+</main>
+<script>
+let selectedDataset=null;
+function fmt(n,d){if(n===null||n===undefined||!isFinite(n))return '—';return Number(n).toFixed(d===undefined?2:d)}
+async function loadDatasets(){
+  const r=await fetch('/api/datasets');const j=await r.json();
+  const d=document.getElementById('datasets');d.innerHTML='';
+  const bt=document.getElementById('btc');
+  bt.innerHTML='<option value="">— none —</option>';
+  j.datasets.forEach(ds=>{
+    const div=document.createElement('div');div.className='ds';
+    const pill = ds.valid?'<span class="pill ok">OK</span>':(ds.errors?`<span class="pill bad">${ds.errors} err</span>`:`<span class="pill warn">${ds.warnings||0} warn</span>`);
+    div.innerHTML=`<div><b>${ds.name}</b><div class="hint">${ds.exchange||'?'} / ${ds.symbol||'?'} · ${ds.timeframe||'?'} · ${ds.rows||0} rows · gaps ${ds.gaps||0}</div></div>${pill}`;
+    div.onclick=()=>{selectedDataset=ds.name;[...d.children].forEach(c=>c.classList.remove('sel'));div.classList.add('sel');};
+    d.appendChild(div);
+    const opt=document.createElement('option');opt.value=ds.name;opt.textContent=ds.name;bt.appendChild(opt);
+  });
+}
+async function loadHistory(){
+  const r=await fetch('/api/runs');const j=await r.json();
+  const h=document.getElementById('history');
+  if(!j.runs.length){h.innerHTML='<div class="hint">No runs yet.</div>';return;}
+  let html='<table><tr><th>Run ID</th><th>Strategy</th><th>Symbol</th><th>Return %</th><th>Trades</th><th>Valid</th><th>When</th></tr>';
+  j.runs.slice(0,30).forEach(r=>{
+    const m=r.metrics||{};
+    const cls=m.return_pct>=0?'ok':'bad';
+    html+=`<tr><td><a href="#" onclick="showRun('${r.run_id}');return false">${r.run_id}</a></td><td>${r.strategy_name||''} ${r.strategy_version||''}</td>
+      <td>${r.exchange||''}/${r.symbol||''} ${r.timeframe||''}</td>
+      <td class="${cls}">${fmt(m.return_pct)}%</td><td>${m.closed_trades||0}</td>
+      <td>${r.validation_ok?'<span class="ok">OK</span>':'<span class="bad">FAIL</span>'}</td>
+      <td style="color:var(--muted)">${(r.created_at||'').slice(0,19).replace('T',' ')}</td></tr>`;
+  });
+  html+='</table>';h.innerHTML=html;
+}
+async function showRun(runId){
+  const r=await fetch('/api/run/'+runId);const j=await r.json();
+  // For brevity just re-render summary + point download links
+  document.getElementById('runid').textContent=runId;
+  document.getElementById('summaryText').textContent=j.summary;
+  document.getElementById('dl-summary').href='/runs/'+runId+'/download/summary';
+  document.getElementById('dl-trades').href='/runs/'+runId+'/download/trades';
+  document.getElementById('dl-equity').href='/runs/'+runId+'/download/equity';
+  document.getElementById('dl-json').href='/runs/'+runId+'/download/json';
+  document.getElementById('result-panel').style.display='block';
+  switchTab('summary');
+}
+async function validate(){
+  if(!selectedDataset){alert('Pick a dataset first');return;}
+  const r=await fetch('/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file:selectedDataset})});
+  const j=await r.json();
+  document.getElementById('validation-panel').style.display='block';
+  const vr=j.report;const md=j.metadata;
+  let html=`<div class="flex-between"><div><b>${selectedDataset}</b> · ${md.exchange}/${md.symbol} ${md.timeframe} · ${md.rows} rows</div>`;
+  html+=vr.ok?'<span class="pill ok">VALID</span>':'<span class="pill bad">INVALID</span>';
+  html+=`</div><pre>`;
+  (vr.issues||[]).forEach(i=>{html+=`${i.severity.toUpperCase().padEnd(7)} ${i.code}: ${i.message}\n`;});
+  html+=`</pre>`;
+  document.getElementById('validation-body').innerHTML=html;
+}
+async function runBacktest(){
+  if(!selectedDataset){alert('Pick a dataset first');return;}
+  const btn=document.getElementById('run');btn.disabled=true;btn.textContent='Running...';
+  const body={
+    dataset:selectedDataset,
+    strategy:document.getElementById('strategy').value,
+    btc_dataset:document.getElementById('btc').value||null,
+    cash:+document.getElementById('cash').value,
+    stake_pct:+document.getElementById('stake_pct').value,
+    fee:+document.getElementById('fee').value,
+    slippage_bps:+document.getElementById('slippage_bps').value,
+    stoploss:document.getElementById('stoploss').value?+document.getElementById('stoploss').value:null,
+    fill_model:document.getElementById('fill_model').value,
+    start:document.getElementById('start').value||null,
+    end:document.getElementById('end').value||null,
+    fail_on_gaps:document.getElementById('fail_on_gaps').checked,
+  };
+  try{
+    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    renderResult(j);
+    loadHistory();
+  }catch(e){alert('Run failed: '+e);}
+  finally{btn.disabled=false;btn.textContent='Run backtest';}
+}
+function renderResult(j){
+  const panel=document.getElementById('result-panel');panel.style.display='block';
+  document.getElementById('runid').textContent=j.run_id;
+  document.getElementById('dl-summary').href='/runs/'+j.run_id+'/download/summary';
+  document.getElementById('dl-trades').href='/runs/'+j.run_id+'/download/trades';
+  document.getElementById('dl-equity').href='/runs/'+j.run_id+'/download/equity';
+  document.getElementById('dl-json').href='/runs/'+j.run_id+'/download/json';
+  const m=j.metrics;
+  const pf = isFinite(m.profit_factor)?fmt(m.profit_factor,3):'∞';
+  const metrics=[
+    ['Final equity',fmt(m.final_equity)],
+    ['Net profit',fmt(m.net_profit),m.net_profit>=0?'good':'bad'],
+    ['Return %',fmt(m.return_pct)+'%',m.return_pct>=0?'good':'bad'],
+    ['Buy & Hold',m.buy_and_hold_return_pct!=null?fmt(m.buy_and_hold_return_pct)+'%':'—'],
+    ['Closed trades',m.closed_trades],
+    ['Win rate',fmt(m.win_rate)+'%'],
+    ['Profit factor',pf],
+    ['Max DD',fmt(m.max_drawdown_pct)+'%','bad'],
+    ['Avg trade',fmt(m.avg_trade_return)+'%'],
+    ['Avg win/loss',fmt(m.avg_win)+' / '+fmt(m.avg_loss)],
+    ['Total fees',fmt(m.total_fees,4)],
+    ['Time in market',fmt(m.time_in_market_pct)+'%'],
+  ];
+  document.getElementById('metrics').innerHTML=metrics.map(([k,v,c])=>`<div class="metric ${c||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  document.getElementById('summaryText').textContent=j.summary;
+  let issues='';j.warnings.forEach(w=>issues+`WARN  ${w}\n`);j.errors.forEach(e=>issues+`ERROR ${e}\n`);
+  document.getElementById('issuesText').textContent=issues||'(no issues)';
+  // Trades table
+  const tt=document.getElementById('tradesTable');
+  if(!j.trades.length){tt.innerHTML='<tr><td colspan=8 style="text-align:left;color:var(--muted)">No closed trades.</td></tr>';}
+  else{
+    let h='<tr><th>Enter</th><th>Exit</th><th>Entry</th><th>Exit</th><th>Qty</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>';
+    j.trades.forEach(t=>{
+      const cls=(t.pnl||0)>=0?'ok':'bad';
+      h+=`<tr><td>${(t.enter_time||'').slice(0,16).replace('T',' ')}</td><td>${(t.exit_time||'').slice(0,16).replace('T',' ')}</td>
+           <td>${fmt(t.enter_price,4)}</td><td>${fmt(t.exit_price,4)}</td><td>${fmt(t.quantity,6)}</td>
+           <td class="${cls}">${fmt(t.pnl)}</td><td class="${cls}">${fmt(t.pnl_pct*100,2)}%</td><td style="color:var(--muted)">${t.exit_reason||t.enter_reason||''}</td></tr>`;
+    });
+    tt.innerHTML=h;
+  }
+  drawChart(j.equity||[]);
+  switchTab('equity');
+}
+function drawChart(pts){
+  const c=document.getElementById('eqChart');const ctx=c.getContext('2d');
+  const w=c.width=c.clientWidth;const h=c.height=c.clientHeight;
+  ctx.fillStyle='#0a0d13';ctx.fillRect(0,0,w,h);
+  if(!pts.length){ctx.fillStyle='#8d96a8';ctx.font='13px sans-serif';ctx.fillText('No data',14,22);return;}
+  const eq=pts.map(p=>p.equity);const min=Math.min(...eq),max=Math.max(...eq);
+  const pad=30;
+  ctx.strokeStyle='#2a3142';ctx.lineWidth=1;
+  // zero / initial line
+  const init=eq[0];const initY=h-pad-(init-min)/(max-min||1)*(h-2*pad);
+  ctx.beginPath();ctx.moveTo(pad,initY);ctx.lineTo(w-pad,initY);ctx.strokeStyle='#394257';ctx.setLineDash([4,4]);ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle='#4f8cff';ctx.lineWidth=2;ctx.beginPath();
+  pts.forEach((p,i)=>{
+    const x=pad+i/(pts.length-1)*(w-2*pad);
+    const y=h-pad-(p.equity-min)/(max-min||1)*(h-2*pad);
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  });ctx.stroke();
+  ctx.fillStyle='#8d96a8';ctx.font='11px sans-serif';
+  ctx.fillText('$'+fmt(max,0),4,pad-10);
+  ctx.fillText('$'+fmt(min,0),4,h-pad+4);
+  ctx.fillText(pts[0].t.slice(0,10),pad,h-10);
+  ctx.fillText(pts[pts.length-1].t.slice(0,10),w-110,h-10);
+}
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+  ['equity','trades','summary','issues'].forEach(n=>{
+    document.getElementById('tab-'+n).style.display=(n===name)?'block':'none';
+  });
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+document.getElementById('validate').onclick=validate;
+document.getElementById('run').onclick=runBacktest;
+document.getElementById('upload').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const fd=new FormData();fd.append('file',f);
+  const r=await fetch('/api/upload',{method:'POST',body:fd});await r.json();
+  loadDatasets();
+};
+loadDatasets();loadHistory();
+</script>
+</body>
+</html>

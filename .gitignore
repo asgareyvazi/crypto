@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+build/
+dist/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Project data & runs (users keep their own datasets in data/; the fixtures
+# inside fixtures/ and clearly-labeled synthetic CSVs under data/ are tracked).
+runs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
