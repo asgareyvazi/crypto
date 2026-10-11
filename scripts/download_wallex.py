@@ -147,7 +147,11 @@ def _records_to_frame(
     duplicates = len(df) - len(df["timestamp"].unique())
     df = df.drop_duplicates(subset=["timestamp"], keep="last").sort_values("timestamp").reset_index(drop=True)
     df.index = pd.DatetimeIndex(df["timestamp"], tz="UTC", name="date")
-    epoch = df.index.view("int64") // 10**9
+    # Convert to epoch seconds in a unit-independent way: explicitly cast to
+    # nanosecond resolution so `.view("int64")` always returns nanoseconds since
+    # epoch regardless of whether pandas defaulted the index to us/ms/s.
+    epoch_ns = df.index.astype("datetime64[ns, UTC]").view("int64")
+    epoch = epoch_ns // 10**9
     on_grid = (epoch % step_s == 0) & (epoch >= start_s) & (epoch <= end_s)
     off_grid = int((~on_grid).sum())
     return df, duplicates, off_grid

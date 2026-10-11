@@ -378,3 +378,101 @@ def test_download_non_5m_timeframe_uses_native_resolution(tmp_path):
     assert stats.resolution == "1h"
     assert stats.expected == 3
     assert all(r == "60" for r, _, _ in seen)
+
+
+# --------------------------------------------------------------------- pandas datetime unit regression
+
+
+def test_records_to_frame_and_aggregation_handle_microsecond_resolution_index(tmp_path):
+    """Regression: when pandas builds a DatetimeIndex at microsecond
+    resolution (``datetime64[us, UTC]``) — as newer pandas does by default —
+    epoch-seconds extraction must not assume nanosecond storage. With 15
+    valid minute-aligned candles (00:00..00:14 UTC) we must see
+    ``off_grid == 0``, ``duplicates == 0``, and three complete 5m buckets.
+    """
+    start = datetime(2025, 1, 1, 0, 0, tzinfo=UTC)
+    end_1m = start + timedelta(minutes=14)
+    records: dict[int, dict] = {}
+    for i in range(15):
+        ts = start + timedelta(minutes=i)
+        records[int(ts.timestamp())] = {
+            "timestamp": ts,
+            "open": 100.0 + i,
+            "high": 101.0 + i,
+            "low": 99.0 + i,
+            "close": 100.5 + i,
+            "volume": 1.0,
+        }
+
+    df, dup, og = dw._records_to_frame(
+        records, step_s=60,
+        start_s=int(start.timestamp()),
+        end_s=int(end_1m.timestamp()),
+    )
+    assert dup == 0
+    assert og == 0, f"expected 0 off-grid with native index, got {og}"
+    assert len(df) == 15
+
+    # Force the index to microsecond resolution to simulate pandas versions
+    # where DatetimeIndex defaults to us.
+    df_us = df.copy()
+    df_us.index = df_us.index.astype("datetime64[us, UTC]")
+    assert str(df_us.index.dtype) == "datetime64[us, UTC]"
+
+    # Re-implement the epoch-second conversion the same way _records_to_frame
+    # does after the fix and confirm 0 off-grid.
+    epoch_ns = df_us.index.astype("datetime64[ns, UTC]").view("int64")
+    epoch = epoch_ns // 10**9
+    on_grid = (epoch % 60 == 0) & (epoch >= int(start.timestamp())) & (epoch <= int(end_1m.timestamp()))
+    assert int((~on_grid).sum()) == 0, "us-resolution index must produce 0 off-grid counts"
+
+    # Aggregation on the us-resolution frame must produce 3 complete 5m buckets.
+    agg = dw.aggregate_1m_to_5m(df_us, start, start + timedelta(minutes=10))
+    assert agg.complete_buckets == 3
+    assert agg.dropped_buckets_missing == 0
+    assert agg.duplicates_1m == 0
+    assert agg.off_grid_1m == 0
+    assert list(agg.df.index) == [
+        pd.Timestamp("2025-01-01 00:00", tz="UTC"),
+        pd.Timestamp("2025-01-01 00:05", tz="UTC"),
+        pd.Timestamp("2025-01-01 00:10", tz="UTC"),
+    ]
+
+
+def test_download_5m_us_index_via_main_returns_exit_zero(tmp_path, monkeypatch):
+    """End-to-end CLI path: ``main(argv)`` returns exit code 0 when the
+    (mocked) API returns all expected candles. This simulates a short
+    live download without hitting the network; exit code 0 asserts the
+    post-fetch validation (missing/off-grid/dup) all report zero."""
+    import io
+
+    start = datetime(2025, 1, 1, 0, 0, tzinfo=UTC)
+    end_open = datetime(2025, 1, 1, 0, 10, tzinfo=UTC)  # three 5m buckets
+
+    def fake_fetch(symbol, resolution, start_s, end_s, timeout=20):
+        assert resolution == "1"
+        n = (end_s - start_s) // 60 + 1
+        t_arr = [start_s + 60 * i for i in range(n)]
+        return {
+            "s": "ok",
+            "t": t_arr,
+            "o": [100.0] * len(t_arr),
+            "h": [101.0] * len(t_arr),
+            "l": [99.0] * len(t_arr),
+            "c": [100.0] * len(t_arr),
+            "v": [1.0] * len(t_arr),
+        }
+
+    out = tmp_path / "btc_5m.csv"
+    monkeypatch.setattr(dw, "fetch_chunk", fake_fetch)
+    monkeypatch.setattr("sys.stdout", io.StringIO())
+    rc = dw.main([
+        "--symbol", "BTCUSDT",
+        "--timeframe", "5m",
+        "--start", start.isoformat().replace("+00:00", "Z"),
+        "--end", end_open.isoformat().replace("+00:00", "Z"),
+        "--output", str(out),
+    ])
+    assert rc == 0, f"expected exit code 0 (clean data), got {rc}"
+    assert len(pd.read_csv(out)) == 3
+
