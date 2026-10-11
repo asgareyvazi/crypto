@@ -6,6 +6,7 @@ from .metrics import MetricsSummary, compute_metrics
 from .report import (
     metrics_to_json,
     result_summary_text,
+    safe_print,
     trades_to_csv,
     write_run_artifacts,
 )
@@ -17,4 +18,5 @@ __all__ = [
     "metrics_to_json",
     "result_summary_text",
     "write_run_artifacts",
+    "safe_print",
 ]

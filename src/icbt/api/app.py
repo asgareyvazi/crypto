@@ -71,10 +71,8 @@ def create_app(runs_dir: Path = Path("runs"), datasets_dir: Path = Path("data"))
     async def index(request: Request):
         datasets = _list_datasets(datasets_dir)
         records = load_records(runs_dir)[::-1][:20]
-        return templates.TemplateResponse(
-            "index.html",
-            _context(request, datasets=datasets, runs=records, strategies=list(STRATEGIES.keys())),
-        )
+        ctx = _context(request, datasets=datasets, runs=records, strategies=list(STRATEGIES.keys()))
+        return templates.TemplateResponse(request, "index.html", ctx)
 
     @app.get("/api/datasets")
     async def api_datasets():

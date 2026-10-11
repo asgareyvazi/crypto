@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .. import __version__
-from ..analytics import result_summary_text, write_run_artifacts
+from ..analytics import result_summary_text, safe_print, write_run_artifacts
 from ..data import OHLCV, load_csv, validate_ohlcv
 from ..engine import BacktestEngine, EngineConfig, FillModel
 from ..engine.persistence import RunRecord, append_record, ensure_runs_dir, file_hash, load_records
@@ -29,8 +29,30 @@ from ..strategy.base import Strategy
 from ..strategy.nfi_x8 import NostalgiaForInfinityX8
 from ..strategy.sma_cross import SmaCrossStrategy
 
+
+def _build_console() -> Console:
+    """Build a Rich Console configured for the current stdout encoding.
+
+    When stdout is not a TTY (e.g. captured by a subprocess, redirected to a
+    file, or running under a legacy Windows codepage like cp1252), Rich should
+    not emit control codes or assume unicode box-drawing is safe. We leave
+    colour/terminal detection on but set ``safe_box`` and ``width`` heuristics
+    so tables fall back to ASCII borders; our own summary text is emitted via
+    :func:`safe_print` with explicit ASCII substitution if the stream cannot
+    encode the separator characters we use.
+    """
+
+    is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    return Console(
+        force_terminal=None if is_tty else False,
+        safe_box=True,
+        highlight=False,
+        # Keep Rich's own width detection; typer/help use this console.
+    )
+
+
 app = typer.Typer(add_completion=False, help="Independent Crypto Backtester (ICBT) CLI")
-console = Console()
+console = _build_console()
 
 
 def _get_strategy(name: str) -> type[Strategy]:
@@ -196,7 +218,7 @@ def run_cmd(
     engine = BacktestEngine(cfg)
     result = engine.run(data, strategy, btc_data=btc_data)
 
-    console.print(result_summary_text(result))
+    safe_print(result_summary_text(result, ascii_only=False), console=console)
 
     runs_dir = ensure_runs_dir(runs_dir)
     paths = write_run_artifacts(result, runs_dir)
