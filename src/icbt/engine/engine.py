@@ -154,12 +154,12 @@ class BacktestEngine:
         for tf in strategy.inf_timeframes:
             if tf == strategy.timeframe:
                 continue
-            suffix = f"_{tf}"
+            suffix = tf
             enriched = merge_informative(
                 enriched, available_inf[tf], suffix, strategy.timeframe, tf
             )
         for tf, bdf in btc_inf.items():
-            suffix = f"_btc_{tf}"
+            suffix = f"btc_{tf}"
             enriched = merge_informative(enriched, bdf, suffix, strategy.timeframe, tf)
 
         # 4. Compute indicators and signals

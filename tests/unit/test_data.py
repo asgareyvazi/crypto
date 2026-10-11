@@ -2,10 +2,12 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from icbt.data import OHLCV, load_csv, manifest_hash, write_csv
 from icbt.data.synthetic import generate_trend_with_cycles
 from icbt.data.timeframes import (
+    ResamplingError,
     merge_informative,
     resample_ohlcv,
     timeframe_to_minutes,
@@ -83,13 +85,71 @@ def test_validate_detects_gaps():
     assert r.ok or any(i.severity == Severity.ERROR for i in r.issues) is False
 
 
-def test_resample_5m_to_1h():
-    data = generate_trend_with_cycles(n_candles=120)
-    h1 = resample_ohlcv(data.df[["open", "high", "low", "close", "volume"]], "5m", "1h")
-    assert len(h1) == len(data.df) // 12
-    # OHLC invariant preserved
+def test_resample_5m_to_1h_drops_partial_buckets():
+    """Partial first/last buckets are dropped; only complete 12-candle hourly buckets remain."""
+    # 126 candles = 10 full hours (00-09) + 6 extra in hour 10 (incomplete, dropped).
+    n = 126
+    d2 = generate_trend_with_cycles(n_candles=n, seed=1)
+    h1 = resample_ohlcv(d2.df[["open", "high", "low", "close", "volume"]], "5m", "1h")
+    # Expected: 10 complete buckets (hours 00:00-09:00), hour 10 is partial (only 6 candles) -> dropped
+    assert len(h1) == 10, f"expected 10 complete hourly buckets, got {len(h1)}"
+    assert h1.index[0] == d2.df.index[0]
     assert (h1["high"] >= h1[["open", "close"]].max(axis=1)).all()
     assert (h1["low"] <= h1[["open", "close"]].min(axis=1)).all()
+    # Each bucket must have EXACTLY 12 candles by checking counts
+    counts = d2.df.resample("1h", label="left", closed="left").size()
+    complete = counts[counts == 12]
+    assert list(h1.index) == list(complete.index), "complete bucket timestamps must match"
+
+
+def test_resample_5m_to_1h_excludes_internal_gap_buckets():
+    """If source candles are missing from the middle of an hour, that bucket must be dropped."""
+    data = generate_trend_with_cycles(n_candles=200, seed=5)
+    df = data.df[["open", "high", "low", "close", "volume"]].copy()
+    # Drop 2 candles from hour index 5 (candles at 05:05 and 05:10)
+    gap_time = df.index[0] + pd.Timedelta(hours=5)
+    drop_idx = [gap_time + pd.Timedelta(minutes=5), gap_time + pd.Timedelta(minutes=10)]
+    df_gapped = df.drop(drop_idx)
+    h1 = resample_ohlcv(df_gapped, "5m", "1h")
+    # The bucket at 05:00 should be missing (incomplete)
+    assert gap_time not in h1.index, "bucket with internal gap must be excluded"
+    # Other complete buckets should still be present.
+    assert df.index[0] in h1.index
+
+
+def test_resample_4h_correct_bucket_count():
+    data = generate_trend_with_cycles(n_candles=48 * 12 + 7, seed=3)  # 48 hours = 576 5m candles + 7 extra (partial last)
+    h4 = resample_ohlcv(data.df[["open", "high", "low", "close", "volume"]], "5m", "4h")
+    assert len(h4) == 12  # 48 hours / 4 per hour = 12 complete 4h buckets
+
+
+def test_resample_rejects_off_grid_source():
+    data = generate_trend_with_cycles(n_candles=120)
+    df = data.df[["open", "high", "low", "close", "volume"]].copy()
+    bad = df.copy()
+    bad.index = bad.index + pd.Timedelta(minutes=1)  # misalign by 1 minute
+    with pytest.raises(ResamplingError):
+        resample_ohlcv(bad, "5m", "1h")
+
+
+def test_resample_deduplicates_source():
+    data = generate_trend_with_cycles(n_candles=120)
+    df = data.df[["open", "high", "low", "close", "volume"]].copy()
+    dup = df.iloc[[10]].copy()
+    df_with_dup = pd.concat([df, dup]).sort_index()
+    h1 = resample_ohlcv(df_with_dup, "5m", "1h")
+    # The hour containing the duplicate row now has 13 rows (one duplicate), so it should be dropped.
+    # That hour is at index[10] -> floor to hour.
+    dup_hour = df.index[10].floor("1h")
+    assert dup_hour not in h1.index, "bucket with duplicate timestamp must be considered incomplete"
+
+
+def test_resample_preserves_tz_and_alignment():
+    data = generate_trend_with_cycles(n_candles=240)
+    h1 = resample_ohlcv(data.df[["open", "high", "low", "close", "volume"]], "5m", "1h")
+    assert str(h1.index.tz) == "UTC"
+    assert (h1.index.minute == 0).all()
+    assert (h1.index.second == 0).all()
 
 
 def test_merge_informative_no_lookahead():

@@ -13,12 +13,18 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# Project data & runs (users keep their own datasets in data/; the fixtures
-# inside fixtures/ and clearly-labeled synthetic CSVs under data/ are tracked).
+# Backtest outputs (large, user-specific)
 runs/
+
+# Downloaded/generated datasets (large binary-ish CSVs)
+data/candles_wallex_*_synthetic.csv
+data/candles_wallex_*.csv
 
 # IDE
 .vscode/
 .idea/
 *.swp
 .DS_Store
+
+# OS
+Thumbs.db
